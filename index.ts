@@ -16,4 +16,12 @@ new ZoomEventDbStack(app, 'ZoomEventDbStack', {
   vpcId: process.env.VPC_ID || '',
   docDbMasterUser: process.env.DOCDB_MASTER_USER || '',
   docDbMasterPassword: process.env.DOCDB_MASTER_PASSWORD || '',
+  tags: {
+    "project": "MH",
+    "department": "OU",
+    "product": "edtech-apps",
+    "subproduct": "zoom-event-db",
+  },
 });
+
+app.synth();

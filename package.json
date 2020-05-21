@@ -26,6 +26,7 @@
   "dependencies": {
     "@aws-cdk/aws-apigateway": "^1.39.0",
     "@aws-cdk/aws-docdb": "^1.39.0",
+    "@aws-cdk/aws-dynamodb": "^1.39.0",
     "@aws-cdk/aws-ec2": "^1.39.0",
     "@aws-cdk/aws-lambda": "^1.39.0",
     "@aws-cdk/aws-secretsmanager": "^1.39.0",

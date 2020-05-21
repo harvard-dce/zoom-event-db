@@ -2,7 +2,7 @@ import * as cdk from '@aws-cdk/core';
 import * as path from 'path';
 import { Vpc, SecurityGroup, Peer, Port, BastionHostLinux, SubnetType } from '@aws-cdk/aws-ec2';
 import { CfnDBSubnetGroup, CfnDBCluster, CfnDBInstance } from '@aws-cdk/aws-docdb';
-import { RestApi, LambdaIntegration } from '@aws-cdk/aws-apigateway';
+import { RestApi, LambdaIntegration, AwsIntegration } from '@aws-cdk/aws-apigateway';
 import { Function, Runtime, Code } from '@aws-cdk/aws-lambda';
 import { CfnOutput } from '@aws-cdk/core';
 
@@ -29,12 +29,16 @@ export class ZoomEventDbStack extends cdk.Stack {
       securityGroupName: 'docdb-sg',
     });
 
-    const subnetIds = vpc.privateSubnets.map((subnet) => {
-        return subnet.subnetId;
-      });
+		const bastionHost = new BastionHostLinux(this, 'SshBastionHost', {
+			vpc,
+			subnetSelection: { subnetType: SubnetType.PUBLIC },
+			instanceName: `${props.stackName}-bastion`,
+			securityGroup: sg,
+		});
+		sg.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
 
     const dbSubnetGroup = new CfnDBSubnetGroup(this, 'DocDbSubnetGroup', {
-      subnetIds,
+      subnetIds: vpc.privateSubnets.map(subnet => subnet.subnetId),
       dbSubnetGroupName: `${props.stackName}-db-subnet-group`,
       dbSubnetGroupDescription: 'DocDB subnet for zoom-event-db',
     });
@@ -56,7 +60,6 @@ export class ZoomEventDbStack extends cdk.Stack {
     sg.addIngressRule(Peer.ipv4(vpc.vpcCidrBlock), Port.tcp(27017));
 
     const DB_URL = `mongodb://${dbCluster.masterUsername}:${dbCluster.masterUserPassword}@${dbCluster.attrEndpoint}:${dbCluster.attrPort}`;
-    const DB_NAME = dbInstance.dbInstanceIdentifier as string;
 
     const newEvent = new Function(this, "PutEventFunction", {
       runtime: Runtime.NODEJS_12_X,
@@ -65,7 +68,6 @@ export class ZoomEventDbStack extends cdk.Stack {
       securityGroup: sg,
       environment: {
         DB_URL,
-        DB_NAME,
       },
       vpc,
     });
@@ -83,12 +85,5 @@ export class ZoomEventDbStack extends cdk.Stack {
       exportName: 'ZoomEventEndpointUrl',
     });
 
-    const bastionHost = new BastionHostLinux(this, 'SshBastionHost', {
-      vpc,
-      subnetSelection: { subnetType: SubnetType.PUBLIC },
-      instanceName: `${props.stackName}-bastion`,
-      securityGroup: sg,
-    });
-    sg.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
   }
 }
