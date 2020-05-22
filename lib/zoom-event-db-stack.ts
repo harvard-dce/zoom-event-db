@@ -82,7 +82,12 @@ export class ZoomEventDbStack extends cdk.Stack {
 
     const eventEndpoint = new CfnOutput(this, 'ZoomEventEndpointUrl', {
       value: `https://${api.restApiId}.execute-api.${this.region}.amazonaws.com/prod/event`,
-      exportName: 'ZoomEventEndpointUrl',
+      exportName: `${props.stackName}-EndpointUrl`,
+    });
+
+    const bastionInstanceId = new CfnOutput(this, 'BastionInstanceId', {
+      value: bastionHost.instanceId,
+      exportName: `${props.stackName}-BastionInstanceId`,
     });
 
   }
