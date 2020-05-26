@@ -1,33 +1,22 @@
 import * as cdk from '@aws-cdk/core';
 import * as path from 'path';
-import { Vpc, SecurityGroup, Peer, Port, BastionHostLinux, SubnetType } from '@aws-cdk/aws-ec2';
-import { CfnDBSubnetGroup, CfnDBCluster, CfnDBInstance } from '@aws-cdk/aws-docdb';
-import { RestApi, LambdaIntegration, AwsIntegration } from '@aws-cdk/aws-apigateway';
+import { Vpc, SecurityGroup, Peer, Port, BastionHostLinux, SubnetType, InstanceType, InstanceClass, InstanceSize } from '@aws-cdk/aws-ec2';
+import { DatabaseCluster } from '@aws-cdk/aws-docdb';
+import { RestApi, LambdaIntegration } from '@aws-cdk/aws-apigateway';
 import { Function, Runtime, Code } from '@aws-cdk/aws-lambda';
+import { Secret } from '@aws-cdk/aws-secretsmanager';
 import { CfnOutput } from '@aws-cdk/core';
 
 export interface ZoomEventDbStackProps extends cdk.StackProps {
   readonly vpcId: string;
-  readonly docDbMasterUser: string;
-  readonly docDbMasterPassword: string;
 }
 
 export class ZoomEventDbStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props: ZoomEventDbStackProps) {
     super(scope, id, props as cdk.StackProps);
 
-    const {
-      vpcId,
-      docDbMasterUser,
-      docDbMasterPassword,
-    } = props;
-
-    const vpc = Vpc.fromLookup(this, 'Vpc', { vpcId }) as Vpc;
-
-    const sg = new SecurityGroup(this, 'docdb-sg', {
-      vpc,
-      securityGroupName: 'docdb-sg',
-    });
+    const vpc = Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId }) as Vpc;
+    const sg = new SecurityGroup(this, 'DocDbSecurityGroup', { vpc });
 
 		const bastionHost = new BastionHostLinux(this, 'SshBastionHost', {
 			vpc,
@@ -35,31 +24,36 @@ export class ZoomEventDbStack extends cdk.Stack {
 			instanceName: `${props.stackName}-bastion`,
 			securityGroup: sg,
 		});
-		sg.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
-
-    const dbSubnetGroup = new CfnDBSubnetGroup(this, 'DocDbSubnetGroup', {
-      subnetIds: vpc.privateSubnets.map(subnet => subnet.subnetId),
-      dbSubnetGroupName: `${props.stackName}-db-subnet-group`,
-      dbSubnetGroupDescription: 'DocDB subnet for zoom-event-db',
-    });
-
-    const dbCluster = new CfnDBCluster(this, 'DocDbCluster', {
-      masterUsername: docDbMasterUser,
-      masterUserPassword: docDbMasterPassword,
-      dbSubnetGroupName: dbSubnetGroup.dbSubnetGroupName,
-      vpcSecurityGroupIds: [sg.securityGroupId],
-      availabilityZones: vpc.availabilityZones,
-    });
-
-    const dbInstance = new CfnDBInstance(this, 'DocDbInstance', {
-      dbClusterIdentifier: dbCluster.ref,
-      dbInstanceClass: "db.r5.large",
-    });
-    dbInstance.addDependsOn(dbCluster);
-
+    sg.addIngressRule(Peer.anyIpv4(), Port.tcp(22));
     sg.addIngressRule(Peer.ipv4(vpc.vpcCidrBlock), Port.tcp(27017));
 
-    const DB_URL = `mongodb://${dbCluster.masterUsername}:${dbCluster.masterUserPassword}@${dbCluster.attrEndpoint}:${dbCluster.attrPort}`;
+    const dbPassword = new Secret(this, 'DbPasswordSecret', {
+      description: `Login password for the ${props.stackName} document db`,
+      secretName: `${props.stackName}DbPassword`,
+      generateSecretString: {
+        excludePunctuation: true,
+        includeSpace: false,
+        passwordLength: 12,
+      },
+    });
+
+    const dbCluster = new DatabaseCluster(this, 'DocDbCluster', {
+      masterUser: {
+        username: 'root',
+        password: dbPassword.secretValue,
+      },
+      instanceProps: {
+        vpc,
+        instanceType: InstanceType.of(InstanceClass.R5, InstanceSize.LARGE),
+        securityGroup: sg,
+        vpcSubnets: {
+          subnetType: SubnetType.PRIVATE,
+        },
+      }
+    });
+
+    const endpoint = dbCluster.clusterEndpoint;
+    const DB_URL = `mongodb://root:${dbPassword.secretValue.toString()}@${endpoint.hostname}:${endpoint.portAsString()}`;
 
     const newEvent = new Function(this, "PutEventFunction", {
       runtime: Runtime.NODEJS_12_X,
@@ -80,14 +74,24 @@ export class ZoomEventDbStack extends cdk.Stack {
     const integration = new LambdaIntegration(newEvent);
     eventResource.addMethod("POST", integration);
 
+    const dbEndpoint = new CfnOutput(this, 'DbEndpoint', {
+      value: dbCluster.clusterEndpoint.hostname,
+      exportName: `${props.stackName}-db-endpoint`,
+    });
+
     const eventEndpoint = new CfnOutput(this, 'ZoomEventEndpointUrl', {
       value: `https://${api.restApiId}.execute-api.${this.region}.amazonaws.com/prod/event`,
-      exportName: `${props.stackName}-EndpointUrl`,
+      exportName: `${props.stackName}-endpoint-url`,
     });
 
     const bastionInstanceId = new CfnOutput(this, 'BastionInstanceId', {
       value: bastionHost.instanceId,
-      exportName: `${props.stackName}-BastionInstanceId`,
+      exportName: `${props.stackName}-bastion-instance-id`,
+    });
+
+    const dbPasswordSecret = new CfnOutput(this, 'DbPasswordSecretArn', {
+      value: dbPassword.secretArn,
+      exportName: `${props.stackName}-db-password-secret-arn`,
     });
 
   }
