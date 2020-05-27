@@ -89,7 +89,7 @@ export class ZoomEventDbStack extends cdk.Stack {
       exportName: `${props.stackName}-bastion-instance-id`,
     });
 
-    const dbPasswordSecret = new CfnOutput(this, 'DbPasswordSecretArn', {
+    const dbPasswordSecret = new CfnOutput(this, '', {
       value: dbPassword.secretArn,
       exportName: `${props.stackName}-db-password-secret-arn`,
     });
